@@ -12,6 +12,7 @@ struct Planet {
     glm::vec3 velocity;
     float mass;
     float radius;
+    glm::vec3 color;
 };
 
 //vertex shader
@@ -31,14 +32,34 @@ void main() {
 //fragment shader
 const char* fragmentShaderSource = R"(
 #version 330 core
+
+uniform vec3 pColor;
 out vec4 FragColor;
+
 void main() {
-    FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+    FragColor = vec4(pColor, 1.0);
 }
 )";
 
 int windowWidth = 800;
 int windowHeight = 600;
+
+//camera stuff
+glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, 15.0f); // start 15 units back
+glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f); // look at the origin
+glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f,  0.0f); // y aaxis is up
+
+//mouse tracking
+bool firstMouse = true;
+float yaw   = -90.0f; // yaw is initialized to -90 degrees so we face the -Z axis
+float pitch =  0.0f;
+float lastX =  800.0f / 2.0f;
+float lastY =  600.0f / 2.0f;
+float fov   =  45.0f; //this will control our zoom
+
+//timing(so camera moves at the same speed regardless of framerate)
+float deltaTime = 0.0f;	
+float lastFrame = 0.0f;
 
 //prototypes
 GLFWwindow* StartGLFW();
@@ -46,6 +67,9 @@ unsigned int compileShader();
 void processInput(GLFWwindow* window); 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void generateSphere(float radius, int sectors, int stacks, std::vector<float>& vertices, std::vector<unsigned int>& indices);
+void mouse_callback(GLFWwindow* window, double xposIn, double yposIn);
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
+
 
 int main(){
     GLFWwindow* window = StartGLFW();
@@ -53,6 +77,11 @@ int main(){
 
     // resize(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetScrollCallback(window, scroll_callback);
+    
+    //locks the mouse to the window & hides the cursor
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
     glEnable(GL_DEPTH_TEST);
     
@@ -87,6 +116,7 @@ int main(){
     sun.velocity = glm::vec3(0.0f, 0.0f, 0.0f);
     sun.mass = 10000.0f;
     sun.radius = 2.0f;
+    sun.color = glm::vec3(1.0f, 0.8f, 0.0f);
     solarSystem.push_back(sun);
 
     Planet earth;
@@ -94,12 +124,17 @@ int main(){
     earth.velocity = glm::vec3(0.0f, 1.3f, 0.0f); 
     earth.mass = 1.0f;
     earth.radius = 0.5f;
+    earth.color = glm::vec3(0.2f, 0.5f, 1.0f);
     solarSystem.push_back(earth);
 
     float G = 0.001f; 
     float dt = 0.016f;
 
     while(!glfwWindowShouldClose(window)){
+        float currentFrame = glfwGetTime();
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
         processInput(window);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -145,14 +180,12 @@ int main(){
                 //     moveX+=0.05f;
                 // }
 
-        glm::mat4 view = glm::mat4(1.0f);
+        glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
         glm::mat4 projection = glm::mat4(1.0f);
 
-        view = glm::translate(view, glm::vec3(0.0f, 0.0f, -15.0f));
-
         float aspect = (float)windowWidth / (float)windowHeight;
-        projection = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
-
+        projection = glm::perspective(glm::radians(fov), aspect, 0.1f, 100.0f);
+        
         //sending matrices to vertex shader
         int viewLoc = glGetUniformLocation(shaderProgram, "view");
         glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
@@ -161,6 +194,7 @@ int main(){
         glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
         
         int modelLoc = glGetUniformLocation(shaderProgram, "model");
+        int colorLoc = glGetUniformLocation(shaderProgram, "pColor");
 
         for(size_t i = 0; i < solarSystem.size(); i++) {
             glm::mat4 model = glm::mat4(1.0f);
@@ -171,6 +205,8 @@ int main(){
             model = glm::scale(model, glm::vec3(solarSystem[i].radius));
 
             glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+            
+            glUniform3fv(colorLoc, 1, glm::value_ptr(solarSystem[i].color));
 
             //draw the VBO for this planet
             glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
@@ -197,10 +233,30 @@ GLFWwindow* StartGLFW(){
     glfwMakeContextCurrent(window);
     return window;
 }
-//esc to close
+//input handling
 void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
+
+    float cameraSpeed = 5.0f * deltaTime; // adjust 5.0f to fly faster or slower
+    
+    // move front/back
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        cameraPos += cameraSpeed * cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        cameraPos -= cameraSpeed * cameraFront;
+        
+    //move left/right
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+        
+    //fly up/down 
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+        cameraPos += cameraSpeed * cameraUp;
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+        cameraPos -= cameraSpeed * cameraUp;
 }
 //resizing
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
@@ -277,4 +333,44 @@ void generateSphere(float radius, int sectors, int stacks, std::vector<float>& v
             }
         }
     }
+}
+
+void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
+    float xpos = static_cast<float>(xposIn);
+    float ypos = static_cast<float>(yposIn);
+
+    if (firstMouse) {
+        lastX = xpos;
+        lastY = ypos;
+        firstMouse = false;
+    }
+
+    float xoffset = xpos - lastX;
+    float yoffset = lastY - ypos; // reversed since y-coords go from bottom to top
+    lastX = xpos;
+    lastY = ypos;
+
+    float sensitivity = 0.1f;
+    xoffset *= sensitivity;
+    yoffset *= sensitivity;
+
+    yaw += xoffset;
+    pitch += yoffset;
+
+    // prevent camera from flipping upside down
+    if (pitch > 89.0f) pitch = 89.0f;
+    if (pitch < -89.0f) pitch = -89.0f;
+
+    // trigo stuff to convert 2D mouse movement into 3D direction vector
+    glm::vec3 front;
+    front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+    front.y = sin(glm::radians(pitch));
+    front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+    cameraFront = glm::normalize(front);
+}
+
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+    fov -= (float)yoffset; // scroll up reduces FOV (zoom in)
+    if (fov < 1.0f) fov = 1.0f;
+    if (fov > 45.0f) fov = 45.0f;
 }
