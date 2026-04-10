@@ -7,6 +7,13 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+struct Planet {
+    glm::vec3 position;
+    glm::vec3 velocity;
+    float mass;
+    float radius;
+};
+
 //vertex shader
 const char* vertexShaderSource = R"(
 #version 330 core
@@ -26,7 +33,7 @@ const char* fragmentShaderSource = R"(
 #version 330 core
 out vec4 FragColor;
 void main() {
-    FragColor = vec4(0.0, 0.0, 1.0, 1.0);
+    FragColor = vec4(1.0, 1.0, 1.0, 1.0);
 }
 )";
 
@@ -66,7 +73,7 @@ int main(){
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sphereIndices.size() * sizeof(unsigned int), sphereIndices.data(), GL_STATIC_DRAW);
 
-    // Tell VAO how to read the VBO
+    //tell VAO how to read the VBO
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
 
@@ -74,66 +81,100 @@ int main(){
 
     unsigned int shaderProgram = compileShader();
 
-    float moveY=0.0f;
-    float moveX=0.0f;
+    std::vector<Planet> solarSystem; 
+    Planet sun;
+    sun.position = glm::vec3(0.0f, 0.0f, 0.0f);
+    sun.velocity = glm::vec3(0.0f, 0.0f, 0.0f);
+    sun.mass = 10000.0f;
+    sun.radius = 2.0f;
+    solarSystem.push_back(sun);
+
+    Planet earth;
+    earth.position = glm::vec3(6.0f, 0.0f, 0.0f); 
+    earth.velocity = glm::vec3(0.0f, 1.3f, 0.0f); 
+    earth.mass = 1.0f;
+    earth.radius = 0.5f;
+    solarSystem.push_back(earth);
+
+    float G = 0.001f; 
+    float dt = 0.016f;
 
     while(!glfwWindowShouldClose(window)){
         processInput(window);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        // glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
+                // glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glUseProgram(shaderProgram);
         glBindVertexArray(VAO);
 
-        glm::mat4 model = glm::mat4(1.0f);
+        //applying gravity
+        for(size_t i=0; i<solarSystem.size(); i++){
+            for(size_t j=0; j<solarSystem.size(); j++){
+                if(i==j) continue; //same planet
+
+                glm::vec3 direction = solarSystem[j].position - solarSystem[i].position;
+                float distance = glm::length(direction);
+
+                //prevent by zero division
+                if(distance > 0.5f) { 
+                    glm::vec3 normalizedDir = glm::normalize(direction);
+                    float force = (G * solarSystem[i].mass * solarSystem[j].mass) / (distance * distance);
+                    glm::vec3 acceleration = (normalizedDir * force) / solarSystem[i].mass;
+                    solarSystem[i].velocity += acceleration * dt;
+                }
+            }
+        }
+
+        //applying velocity to position
+        for(size_t i=0; i<solarSystem.size(); i++){
+            solarSystem[i].position += solarSystem[i].velocity * dt;
+        }
+
+                // if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS){
+                //     moveY+=0.05f;
+                // }
+                // if(glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS){
+                //     moveY-=0.05f;
+                // }
+                // if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS){
+                //     moveX-=0.05f;
+                // }
+                // if(glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS){
+                //     moveX+=0.05f;
+                // }
+
         glm::mat4 view = glm::mat4(1.0f);
         glm::mat4 projection = glm::mat4(1.0f);
 
-        // 2. Setup the Model: Let's push the planet a little to the right
-        // model = glm::translate(model, glm::vec3(width/2.0f, yPos, 0.0f));
-
-
-        if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS){
-            moveY+=0.05f;
-        }
-        if(glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS){
-            moveY-=0.05f;
-        }
-        if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS){
-            moveX-=0.05f;
-        }
-        if(glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS){
-            moveX+=0.05f;
-        }
-        
-        model = glm::translate(model, glm::vec3(moveX, moveY, 0.0f));
-        model = glm::rotate(model, ((float)glfwGetTime())/2.0f, glm::vec3(1.0f, 1.0f, 1.0f));
-
-        view = glm::translate(view, glm::vec3(0.0f, 0.0f, -5.0f));
+        view = glm::translate(view, glm::vec3(0.0f, 0.0f, -15.0f));
 
         float aspect = (float)windowWidth / (float)windowHeight;
         projection = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
 
-        // 5. Send the matrices to your Vertex Shader
-        int modelLoc = glGetUniformLocation(shaderProgram, "model");
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-
+        //sending matrices to vertex shader
         int viewLoc = glGetUniformLocation(shaderProgram, "view");
         glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
-
+        
         int projLoc = glGetUniformLocation(shaderProgram, "projection");
         glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
-
-        // Draw the shape
-        glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
         
-        // glm::vec4 vec(1.0f, 0.0f, 0.0f, 1.0f);
-        // glm::mat4 trans = glm::mat4(1.0f);
-        // trans = glm::translate(trans, glm::vec3(1.0f, 1.0f, 0.0f));
-        // vec = trans * vec;
-        // std::cout << vec.x << vec.y << vec.z << std::endl;
+        int modelLoc = glGetUniformLocation(shaderProgram, "model");
+
+        for(size_t i = 0; i < solarSystem.size(); i++) {
+            glm::mat4 model = glm::mat4(1.0f);
+            
+            //apply transformations = read backwards: scale -> rotate -> translate
+            model = glm::translate(model, solarSystem[i].position);
+            model = glm::rotate(model, ((float)glfwGetTime())/2.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+            model = glm::scale(model, glm::vec3(solarSystem[i].radius));
+
+            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+
+            //draw the VBO for this planet
+            glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
