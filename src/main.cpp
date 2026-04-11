@@ -13,6 +13,7 @@ struct Planet {
     float mass;
     float radius;
     glm::vec3 color;
+    std::vector<glm::vec3> trail;
 };
 
 //vertex shader
@@ -43,7 +44,8 @@ void main() {
 
 int windowWidth = 800;
 int windowHeight = 600;
-
+bool showOrbit=true;
+bool oKeyPressed=false;
 //camera stuff
 glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, 15.0f); // start 15 units back
 glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f); // look at the origin
@@ -89,6 +91,7 @@ int main(){
     std::vector<unsigned int> sphereIndices;
     generateSphere(1.0f, 36, 18, sphereVertices, sphereIndices);
 
+    //vertex objects
     GLuint VAO, VBO, EBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -101,10 +104,19 @@ int main(){
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sphereIndices.size() * sizeof(unsigned int), sphereIndices.data(), GL_STATIC_DRAW);
-
     //tell VAO how to read the VBO
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+
+    GLuint trailVAO, trailVBO;
+    glGenVertexArrays(1, &trailVAO);
+    glGenBuffers(1, &trailVBO);
+
+    glBindVertexArray(trailVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, trailVBO);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
 
     glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
@@ -165,6 +177,7 @@ int main(){
         //applying velocity to position
         for(size_t i=0; i<solarSystem.size(); i++){
             solarSystem[i].position += solarSystem[i].velocity * dt;
+            solarSystem[i].trail.push_back(solarSystem[i].position);
         }
 
                 // if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS){
@@ -196,7 +209,23 @@ int main(){
         int modelLoc = glGetUniformLocation(shaderProgram, "model");
         int colorLoc = glGetUniformLocation(shaderProgram, "pColor");
 
-        for(size_t i = 0; i < solarSystem.size(); i++) {
+        for(size_t i = 0; i < solarSystem.size(); i++){
+            if(showOrbit && !solarSystem[i].trail.empty()){
+                glBindVertexArray(trailVAO);
+
+                glBindBuffer(GL_ARRAY_BUFFER, trailVBO);
+                glBufferData(GL_ARRAY_BUFFER, solarSystem[i].trail.size() * sizeof(glm::vec3), solarSystem[i].trail.data(), GL_DYNAMIC_DRAW);
+
+                glm::mat4 trailModel = glm::mat4(1.0f);
+                glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(trailModel));
+                glUniform3fv(colorLoc, 1, glm::value_ptr(solarSystem[i].color));
+
+                glPointSize(2.0f); 
+                glDrawArrays(GL_LINE_STRIP, 0, solarSystem[i].trail.size());
+                // line instead of dots = GL_POINTS to GL_LINE_STRIP
+            }
+
+            glBindVertexArray(VAO);
             glm::mat4 model = glm::mat4(1.0f);
             
             //apply transformations = read backwards: scale -> rotate -> translate
@@ -205,7 +234,6 @@ int main(){
             model = glm::scale(model, glm::vec3(solarSystem[i].radius));
 
             glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-            
             glUniform3fv(colorLoc, 1, glm::value_ptr(solarSystem[i].color));
 
             //draw the VBO for this planet
@@ -238,6 +266,16 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
+    if(glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS){
+        if(!oKeyPressed){
+            oKeyPressed=true;
+            showOrbit=!showOrbit;
+        }
+    }
+    else{
+        oKeyPressed=false;
+    }
+    
     float cameraSpeed = 5.0f * deltaTime; // adjust 5.0f to fly faster or slower
     
     // move front/back
