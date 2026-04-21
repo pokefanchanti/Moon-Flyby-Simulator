@@ -21,12 +21,22 @@ struct Planet
 const char *vertexShaderSource = R"(
 #version 330 core
 layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+
+out vec3 FragPos;
+out vec3 Normal;
 
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
 
 void main() {
+        
+//calc location of vertex in world space
+    FragPos = vec3(model * vec4(aPos, 1.0));
+    
+        //correct normal vector if planet is scaled or rotated
+    Normal = mat3(transpose(inverse(model))) * aNormal;
     gl_Position = projection * view * model * vec4(aPos, 1.0);
 }
 )";
@@ -35,11 +45,42 @@ void main() {
 const char *fragmentShaderSource = R"(
 #version 330 core
 
+
 uniform vec3 pColor;
+uniform vec3 lightPos; //position of light source
+uniform vec3 viewPos; //position of camera
+uniform bool isSun; //is current object being rendered the ligth source?
+
+in vec3 FragPos;
+in vec3 Normal;
+
 out vec4 FragColor;
 
-void main() {
-    FragColor = vec4(pColor, 1.0);
+void main(){
+    if(isSun){
+        FragColor = vec4(pColor, 1.0);
+        return;
+    }
+    
+        //ambient lighting
+    float ambientStrength = 0.10;
+    vec3 ambient = ambientStrength * vec3(1.0);
+
+        //diffuse lighting
+    vec3 norm = normalize(Normal);
+    vec3 lightDir = normalize(lightPos - FragPos);
+    float diff = max(dot(norm, lightDir), 0.0);
+    vec3 diffuse = diff * vec3(1.0);
+
+        //specular lighting
+    float specularStrength = 0.2;
+    vec3 viewDir = normalize(viewPos - FragPos);
+    vec3 reflectDir = reflect(-lightDir, norm);  
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 16);
+    vec3 specular = specularStrength * spec * vec3(1.0);
+
+    vec3 result = (ambient + diffuse + specular) * pColor;
+    FragColor = vec4(result, 1.0);
 }
 )";
 
@@ -67,7 +108,7 @@ float lastFrame = 0.0f;
 // prototypes
 GLFWwindow *StartGLFW();
 unsigned int compileShader();
-void processInput(GLFWwindow *window);
+void processInput(GLFWwindow *window, std::vector<Planet> &solarSystem);
 void framebuffer_size_callback(GLFWwindow *window, int width, int height);
 void generateSphere(float radius, int sectors, int stacks, std::vector<float> &vertices, std::vector<unsigned int> &indices);
 void mouse_callback(GLFWwindow *window, double xposIn, double yposIn);
@@ -106,8 +147,11 @@ int main()
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sphereIndices.size() * sizeof(unsigned int), sphereIndices.data(), GL_STATIC_DRAW);
     // tell VAO how to read the VBO
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)(3*sizeof(float)));
+    glEnableVertexAttribArray(1);
 
     GLuint trailVAO, trailVBO;
     glGenVertexArrays(1, &trailVAO);
@@ -119,7 +163,7 @@ int main()
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void *)0);
 
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
     unsigned int shaderProgram = compileShader();
 
@@ -142,7 +186,7 @@ int main()
     solarSystem.push_back(earth);
 
     Planet moon;
-    moon.position = glm::vec3(0.0f, 0.0f, -60.0f);
+    moon.position = glm::vec3(0.0f, 0.0f, -60.3f);
     moon.velocity = glm::vec3(0.0f, 0.0f, 0.0f);
     // moon.velocity = glm::vec3(0.0f, 0.0f, -1.3f);
     moon.mass = 0.0123f;
@@ -151,7 +195,7 @@ int main()
     solarSystem.push_back(moon);
 
     Planet sun;
-    sun.position = glm::vec3(0.0f, 0.0f, -23455.63f);
+    sun.position = glm::vec3(0.0f, 0.0f, 23455.63f);
     sun.velocity = glm::vec3(0.0f, 0.0f, 0.0f);
     sun.mass = 0.1f;
     // sun.mass = 333000.0f;
@@ -159,11 +203,26 @@ int main()
     sun.color = glm::vec3(1.0f, 0.8f, 0.0f);
     solarSystem.push_back(sun);
 
+    // 4. THE ROCKET (Artemis II)
+    Planet rocket;
+    // Start it in Low Earth Orbit (LEO) - slightly above the Earth's surface
+    // Earth radius is 1.0, so we put the rocket at 1.05
+    rocket.position = glm::vec3(0.0f, 0.0f, 1.05f); 
+    rocket.velocity = glm::vec3(0.0f, 0.0f, 0.0f);
+    rocket.mass = 0.0000001f; // Effectively zero mass
+    rocket.radius = 0.05f;    // Exaggerated visual size so we can see it
+    rocket.color = glm::vec3(0.0f, 1.0f, 0.0f); // Bright green!
+    solarSystem.push_back(rocket);
+
     // float G = 6.674f*pow(10,-11);
     float G = 10.0f;
     float dt = 0.016f;
-    float orbitalVelocity = sqrt((G * earth.mass) / 60.0f);
-    solarSystem[1].velocity = glm::vec3(orbitalVelocity, 0.0f, 0.0f);
+
+    float moonOrbitVel = sqrt((G * earth.mass) / abs(moon.position.z));
+    solarSystem[1].velocity = glm::vec3(moonOrbitVel, 0.0f, 0.0f);
+    // Calculate orbital velocity for the Rocket in LEO
+    float rocketOrbitVel = sqrt((G * earth.mass) / abs(rocket.position.z));
+    solarSystem[3].velocity = glm::vec3(rocketOrbitVel, 0.0f, 0.0f);
 
     // calc cameraFront vector
     glm::vec3 front;
@@ -178,7 +237,7 @@ int main()
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        processInput(window);
+        processInput(window, solarSystem);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         // glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
@@ -189,10 +248,11 @@ int main()
 
         // applying gravity
         for (size_t i = 0; i < solarSystem.size(); i++){
-            if(i==2) continue;
+            if(i==2) continue; //skip the sun
             for (size_t j = 0; j < solarSystem.size(); j++){
                 if(i==j) continue; // same planet
-                if(j==2) continue;
+                if(j==2) continue; //skip the sun
+                if(i==0 && j==1) continue; //earth pulled by moon
                 glm::vec3 direction = solarSystem[j].position - solarSystem[i].position;
                 float distance = glm::length(direction);
 
@@ -233,12 +293,20 @@ int main()
 
         int modelLoc = glGetUniformLocation(shaderProgram, "model");
         int colorLoc = glGetUniformLocation(shaderProgram, "pColor");
+        
+        // NEW: Get the lighting uniform locations
+        int lightPosLoc = glGetUniformLocation(shaderProgram, "lightPos");
+        int viewPosLoc = glGetUniformLocation(shaderProgram, "viewPos");
+        int isSunLoc = glGetUniformLocation(shaderProgram, "isSun");
 
+        // Send Camera and Sun position to the shader
+        glUniform3fv(viewPosLoc, 1, glm::value_ptr(cameraPos));
+        glUniform3fv(lightPosLoc, 1, glm::value_ptr(solarSystem[2].position)); // Sun is index 2
         // glm::vec3 customAxis = glm::normalize(glm::vec3(0.4f, 1.0f, 0.1f));
 
         for (size_t i = 0; i < solarSystem.size(); i++){
             if (showOrbit && !solarSystem[i].trail.empty()){
-                glBindVertexArray(trailVAO);
+                glBindVertexArray(trailVAO);    
 
                 glBindBuffer(GL_ARRAY_BUFFER, trailVBO);
                 glBufferData(GL_ARRAY_BUFFER, solarSystem[i].trail.size() * sizeof(glm::vec3), solarSystem[i].trail.data(), GL_DYNAMIC_DRAW);
@@ -246,6 +314,7 @@ int main()
                 glm::mat4 trailModel = glm::mat4(1.0f);
                 glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(trailModel));
                 glUniform3fv(colorLoc, 1, glm::value_ptr(solarSystem[i].color));
+                glUniform1i(isSunLoc, 1);
 
                 glPointSize(2.0f);
                 glDrawArrays(GL_LINE_STRIP, 0, solarSystem[i].trail.size());
@@ -254,6 +323,13 @@ int main()
 
             glBindVertexArray(VAO);
             glm::mat4 model = glm::mat4(1.0f);
+
+            if(i==2){
+                glUniform1i(isSunLoc, 1); // True
+            } 
+            else{
+                glUniform1i(isSunLoc, 0); // False
+            }
 
             // apply transformations = read backwards: scale -> rotate -> translate
             model = glm::translate(model, solarSystem[i].position);
@@ -290,27 +366,37 @@ GLFWwindow *StartGLFW()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow *window = glfwCreateWindow(windowWidth, windowHeight, "OpenGL", NULL, NULL);
+    GLFWwindow *window = glfwCreateWindow(windowWidth, windowHeight, "Artemis II", NULL, NULL);
     glfwMakeContextCurrent(window);
     return window;
 }
 // input handling
-void processInput(GLFWwindow *window)
+void processInput(GLFWwindow *window, std::vector<Planet> &solarSystem)
 {
-    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    if (glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS)
-    {
-        if (!oKeyPressed)
-        {
+    if(glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS){
+        if (!oKeyPressed){
             oKeyPressed = true;
             showOrbit = !showOrbit;
         }
     }
-    else
-    {
+    else{
         oKeyPressed = false;
+    }
+
+    if(solarSystem.size()>3){
+        glm::vec3 direction = glm::normalize(solarSystem[3].velocity);
+        float thrust = 2.0f * deltaTime;
+
+        if(glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS){
+            solarSystem[3].velocity += direction * thrust;
+        }
+
+        if(glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS){
+            solarSystem[3].velocity -= direction * thrust;
+        }
     }
 
     float cameraSpeed = 5.0f * deltaTime; // adjust 5.0f to fly faster or slower
@@ -396,9 +482,15 @@ void generateSphere(float radius, int sectors, int stacks, std::vector<float> &v
             float x = xy * cosf(sectorAngle);
             float y = xy * sinf(sectorAngle);
 
+            //vertices
             vertices.push_back(x);
             vertices.push_back(y);
             vertices.push_back(z);
+
+            //normals
+            vertices.push_back(x / radius);
+            vertices.push_back(y / radius);
+            vertices.push_back(z / radius);
         }
     }
 
