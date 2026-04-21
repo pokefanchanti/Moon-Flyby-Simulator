@@ -168,10 +168,17 @@ int windowHeight = 1080;
 bool showOrbit = true;
 bool oKeyPressed = false;
 // camera stuff
-glm::vec3 cameraPos = glm::vec3(0.0f, 15.0f, 30.0f); // start 15 units back
+glm::vec3 cameraPos = glm::vec3(0.0f, 5.0f, 10.0f); // start 15 units back
 glm::vec3 cameraFront;
 glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f); // y aaxis is up
 
+//orbital cam stuff
+bool isOrbitalMode = true;        // Start locked onto a planet!
+int targetIndex = 0;              // 0=Earth, 1=Moon, 2=Sun, 3=Rocket
+float orbitDistance = 4.0f;       // How far away we orbit
+bool tabKeyPressed = false;       // To prevent rapid-fire switching
+bool cKeyPressed = false;
+bool switched = false;
 // mouse tracking
 bool firstMouse = true;
 float yaw = -90.0f; // yaw is initialized to -90 degrees so we face the -Z axis
@@ -276,10 +283,10 @@ int main()
     earth.axialTilt = 23.4f;
     earth.rotationSpeedFactor = 1.0f;
     earth.color = glm::vec3(0.2f, 0.5f, 1.0f);
-    earth.textureID = loadTexture("../earth_8k.jpg");
-    earth.cloudTextureID = loadTexture("../clouds_8k.png");
-    earth.nightTextureID = loadTexture("../night_8k.jpg");
-    earth.specularMapID = loadTexture("../earth_specular.png");
+    earth.textureID = loadTexture("../textures/earth_8k.jpg");
+    earth.cloudTextureID = loadTexture("../textures/clouds_8k.png");
+    earth.nightTextureID = loadTexture("../textures/night_8k.jpg");
+    earth.specularMapID = loadTexture("../textures/earth_specular.png");
     solarSystem.push_back(earth);
     
     Planet moon;
@@ -291,7 +298,7 @@ int main()
     moon.mass = 0.0123f;
     moon.radius = 0.273f;
     moon.color = glm::vec3(0.749f, 0.764f, 0.800f);
-    moon.textureID = loadTexture("../moon.jpg");
+    moon.textureID = loadTexture("../textures/moon.jpg");
     solarSystem.push_back(moon);
     
     Planet sun;
@@ -303,10 +310,10 @@ int main()
     sun.mass = 333000.0f; 
     sun.radius = 109.0f;
     sun.color = glm::vec3(1.0f, 0.8f, 0.0f);
-    sun.textureID = loadTexture("../sun.jpg");
+    sun.textureID = loadTexture("../textures/sun.jpg");
     solarSystem.push_back(sun);
 
-    unsigned int skyboxTexture = loadTexture("../milkyway_8k.jpg");
+    unsigned int skyboxTexture = loadTexture("../textures/milkyway_8k.jpg");
 
     // 4. THE ROCKET (Artemis II)
     Planet rocket;
@@ -315,8 +322,8 @@ int main()
     rocket.position = glm::vec3(0.0f, 0.0f, 1.05f); 
     rocket.velocity = glm::vec3(0.0f, 0.0f, 0.0f);
     rocket.axialTilt = 0.0f;
-    rocket.mass = 0.0000001f; // Effectively zero mass
-    rocket.radius = 0.05f;    // Exaggerated visual size so we can see it
+    rocket.mass = 0.000000001f; // Effectively zero mass
+    rocket.radius = 0.025f;    // Exaggerated visual size so we can see it
     rocket.color = glm::vec3(0.0f, 1.0f, 0.0f); // Bright green!
     solarSystem.push_back(rocket);
 
@@ -384,11 +391,31 @@ int main()
             solarSystem[i].trail.push_back(solarSystem[i].position);
         }
 
-        glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-        glm::mat4 projection = glm::mat4(1.0f);
+        //camera positioning math
+        glm::mat4 view;
+        if(isOrbitalMode){
+            glm::vec3 targetPos = solarSystem[targetIndex].position;
+            float targetRadius = solarSystem[targetIndex].radius;
+            float minSafeDistance = targetRadius * 1.2f;
+            // float defaultDistance = targetRadius * 4.0f;
 
+            // if(switched) {
+            //     orbitDistance = defaultDistance;
+            //     switched = false;
+            // }
+            if(orbitDistance < minSafeDistance) orbitDistance = minSafeDistance;
+            cameraPos = targetPos - (cameraFront * orbitDistance);
+            
+            // 3. Look directly at the target!
+            view = glm::lookAt(cameraPos, targetPos, cameraUp);
+        }else{
+            // Standard Free-Fly Camera
+            view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+        }
+
+        glm::mat4 projection = glm::mat4(1.0f);
         float aspect = (float)windowWidth / (float)windowHeight;
-        projection = glm::perspective(glm::radians(fov), aspect, 0.1f, 1000000.0f);
+        projection = glm::perspective(glm::radians(fov), aspect, 0.1f, 10000000.0f);
 
         // sending matrices to vertex shader
         int viewLoc = glGetUniformLocation(shaderProgram, "view");
@@ -427,7 +454,7 @@ int main()
         skyboxModel = glm::translate(skyboxModel, cameraPos); 
         
         // 3. Make it ridiculously massive
-        skyboxModel = glm::scale(skyboxModel, glm::vec3(50000.0f)); 
+        skyboxModel = glm::scale(skyboxModel, glm::vec3(500000.0f)); 
 
         glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(skyboxModel));
 
@@ -560,7 +587,7 @@ int main()
                 cloudModel = glm::rotate(cloudModel, glm::radians(90.0f + 23.4f), glm::vec3(1.0f, 0.0f, 0.0f));
                 float cloudSpeed = 1.2f; 
                 cloudModel = glm::rotate(cloudModel, ((float)glfwGetTime() / 2.0f) * cloudSpeed, glm::vec3(0.0f, 0.0f, 1.0f));
-                cloudModel = glm::scale(cloudModel, glm::vec3(solarSystem[i].radius * 1.005f));
+                cloudModel = glm::scale(cloudModel, glm::vec3(solarSystem[i].radius * 1.00313f));
 
                 glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(cloudModel));
                 
@@ -602,6 +629,7 @@ void processInput(GLFWwindow *window, std::vector<Planet> &solarSystem)
     if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
+    //orbit toggle
     if(glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS){
         if (!oKeyPressed){
             oKeyPressed = true;
@@ -612,8 +640,38 @@ void processInput(GLFWwindow *window, std::vector<Planet> &solarSystem)
         oKeyPressed = false;
     }
 
+    //cam toggle
+    if(glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) {
+        if (!cKeyPressed){
+            isOrbitalMode = !isOrbitalMode;
+            cKeyPressed = true;
+        }
+    } else { cKeyPressed = false; }
+
+    //orb cam : planet toggle
+    if(glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
+        if (!tabKeyPressed){
+            targetIndex++;
+            if (targetIndex >= solarSystem.size()) targetIndex = 0;
+            switched = true;
+            tabKeyPressed = true;
+        }
+    } else { tabKeyPressed = false; }
+
     if(solarSystem.size()>3){
         glm::vec3 direction = glm::normalize(solarSystem[3].velocity);
+        glm::vec3 dir2 = cameraFront; 
+        
+        float thrust2 = 5.0f * deltaTime; 
+
+        if(glfwGetKey(window, GLFW_KEY_I) == GLFW_PRESS){
+            solarSystem[3].velocity += dir2 * thrust2;
+        }
+
+        if(glfwGetKey(window, GLFW_KEY_K) == GLFW_PRESS){
+            solarSystem[3].velocity -= dir2 * thrust2;
+        }
+
         float thrust = 2.0f * deltaTime;
 
         if(glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS){
@@ -625,34 +683,37 @@ void processInput(GLFWwindow *window, std::vector<Planet> &solarSystem)
         }
     }
 
-    float cameraSpeed = 5.0f * deltaTime; // adjust 5.0f to fly faster or slower
+    if(!isOrbitalMode){
+        float cameraSpeed = 5.0f * deltaTime;
+     // adjust 5.0f to fly faster or slower
 
-    // move front/back
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        cameraPos += glm::normalize(glm::cross(glm::normalize(glm::cross(cameraFront, cameraUp)), cameraUp)) * cameraSpeed;
-    else if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        cameraPos += glm::normalize(glm::cross(glm::normalize(glm::cross(cameraFront, cameraUp)), cameraUp)) * cameraSpeed;
-        // cameraPos += cameraSpeed * cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        cameraPos -=glm::normalize(glm::cross(glm::normalize(glm::cross(cameraFront, cameraUp)), cameraUp)) * cameraSpeed;
-    else if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        cameraPos -=glm::normalize(glm::cross(glm::normalize(glm::cross(cameraFront, cameraUp)), cameraUp)) * cameraSpeed;
+        // move front/back
+        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            cameraPos += glm::normalize(glm::cross(glm::normalize(glm::cross(cameraFront, cameraUp)), cameraUp)) * cameraSpeed;
+        else if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            cameraPos += glm::normalize(glm::cross(glm::normalize(glm::cross(cameraFront, cameraUp)), cameraUp)) * cameraSpeed;
+            // cameraPos += cameraSpeed * cameraFront;
+        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+            cameraPos -=glm::normalize(glm::cross(glm::normalize(glm::cross(cameraFront, cameraUp)), cameraUp)) * cameraSpeed;  
+        else if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+            cameraPos -=glm::normalize(glm::cross(glm::normalize(glm::cross(cameraFront, cameraUp)), cameraUp)) * cameraSpeed;
 
-    // move left/right
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+        // move left/right
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+            cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
 
-    // fly up/down
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-        cameraPos += 10 * cameraSpeed * cameraUp;
-    else if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-        cameraPos += cameraSpeed * cameraUp;
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
-        cameraPos -= 10 * cameraSpeed * cameraUp;
-    else if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
-        cameraPos -= cameraSpeed * cameraUp;
+        // fly up/down
+        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+            cameraPos += 10 * cameraSpeed * cameraUp;
+        else if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+            cameraPos += cameraSpeed * cameraUp;
+        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
+            cameraPos -= 10 * cameraSpeed * cameraUp;
+        else if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
+            cameraPos -= cameraSpeed * cameraUp;
+    }
 }
 // resizing
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
@@ -801,7 +862,7 @@ void mouse_callback(GLFWwindow *window, double xposIn, double yposIn)
     lastX = xpos;
     lastY = ypos;
 
-    float sensitivity = 0.1f;
+    float sensitivity = (0.1f/45.0f) * fov;
     xoffset *= sensitivity;
     yoffset *= sensitivity;
 
@@ -823,10 +884,18 @@ void mouse_callback(GLFWwindow *window, double xposIn, double yposIn)
 }
 
 void scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
-{
-    fov -= (float)yoffset; // scroll up reduces FOV (zoom in)
-    if (fov < 1.0f)
-        fov = 1.0f;
-    if (fov > 45.0f)
-        fov = 45.0f;
+{   
+    if(isOrbitalMode){
+        // Zoom in and out by scrolling!
+        float zoomSpeed = orbitDistance * 0.1f;
+        orbitDistance -= (float)yoffset * zoomSpeed;
+        if (orbitDistance > 500.0f) orbitDistance = 500.0f;
+    }else{
+        //free fly cam
+        fov -= (float)yoffset; // scroll up reduces FOV (zoom in)
+        if (fov < 1.0f)
+            fov = 1.0f;
+        if (fov > 45.0f)
+            fov = 45.0f;
+    }
 }
