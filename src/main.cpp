@@ -198,6 +198,7 @@ unsigned int loadTexture(char const * path);
 void processInput(GLFWwindow *window, std::vector<Planet> &solarSystem);
 void framebuffer_size_callback(GLFWwindow *window, int width, int height);
 void generateSphere(float radius, int sectors, int stacks, std::vector<float> &vertices, std::vector<unsigned int> &indices);
+void generateRocketGeometry(float radius, float bodyHeight, float coneHeight, int sectors, std::vector<float> &vertices, std::vector<unsigned int> &indices, int &bodyIndexCount, int &coneIndexCount);
 void mouse_callback(GLFWwindow *window, double xposIn, double yposIn);
 void scroll_callback(GLFWwindow *window, double xoffset, double yoffset);
 
@@ -223,7 +224,7 @@ int main()
     std::vector<unsigned int> sphereIndices;
     generateSphere(1.0f, 72, 36, sphereVertices, sphereIndices);
 
-    // vertex objects
+    // sphere vertex objects
     GLuint VAO, VBO, EBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -246,6 +247,35 @@ int main()
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6*sizeof(float)));
     glEnableVertexAttribArray(2);
 
+    //rocket vertex objects
+    std::vector<float> rocketVertices;
+    std::vector<unsigned int> rocketIndices;
+    int rocketBodyCount = 0;
+    int rocketConeCount = 0;
+    // radius: 1.0f, body height: 4.0f, cone height: 2.0f, sectors: 36
+    generateRocketGeometry(1.0f, 4.0f, 2.0f, 36, rocketVertices, rocketIndices, rocketBodyCount, rocketConeCount);
+
+    GLuint rocketVAO, rocketVBO, rocketEBO;
+    glGenVertexArrays(1, &rocketVAO);
+    glGenBuffers(1, &rocketVBO);
+    glGenBuffers(1, &rocketEBO);
+
+    glBindVertexArray(rocketVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, rocketVBO);
+    glBufferData(GL_ARRAY_BUFFER, rocketVertices.size() * sizeof(float), rocketVertices.data(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rocketEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, rocketIndices.size() * sizeof(unsigned int), rocketIndices.data(), GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+
+    //trail vertex objects
     GLuint trailVAO, trailVBO;
     glGenVertexArrays(1, &trailVAO);
     glGenBuffers(1, &trailVBO);
@@ -302,7 +332,7 @@ int main()
     solarSystem.push_back(moon);
     
     Planet sun;
-    sun.position = glm::vec3(0.0f, 0.0f, 23455.63f);
+    sun.position = glm::vec3(0.0f, 0.0f, -23455.63f);
     sun.velocity = glm::vec3(0.0f, 0.0f, 0.0f);
     // sun.mass = 0.1f;
     sun.axialTilt=7.0f;
@@ -323,7 +353,7 @@ int main()
     rocket.velocity = glm::vec3(0.0f, 0.0f, 0.0f);
     rocket.axialTilt = 0.0f;
     rocket.mass = 0.000000001f; // Effectively zero mass
-    rocket.radius = 0.025f;    // Exaggerated visual size so we can see it
+    rocket.radius = 0.00625f;    // Exaggerated visual size so we can see it
     rocket.color = glm::vec3(0.0f, 1.0f, 0.0f); // Bright green!
     solarSystem.push_back(rocket);
 
@@ -335,7 +365,7 @@ int main()
     solarSystem[1].velocity = glm::vec3(moonOrbitVel, 0.0f, 0.0f);
     // Calculate orbital velocity for the Rocket in LEO
     float rocketOrbitVel = sqrt((G * earth.mass) / abs(rocket.position.z));
-    solarSystem[3].velocity = glm::vec3(rocketOrbitVel, 0.0f, 0.0f);
+    solarSystem[3].velocity = glm::vec3(-rocketOrbitVel, 0.0f, 0.0f);
 
     // calc cameraFront vector
     glm::vec3 front;
@@ -547,7 +577,58 @@ int main()
             }
 
             glUniform1i(isCloudLoc, 0);
-            glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+
+            if (i == 3) {
+                //rocket rendering
+                glBindVertexArray(rocketVAO);
+                
+                glm::mat4 rocketModel = glm::mat4(1.0f);
+                rocketModel = glm::translate(rocketModel, solarSystem[i].position);
+                
+                // make rocekt face the direction its moving i.e its velocity
+                if (glm::length(solarSystem[i].velocity) > 0.0001f) {
+                    glm::vec3 velDir = glm::normalize(solarSystem[i].velocity);
+                    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+                    
+                    // Calculate axis and angle to rotate 'up' towards 'velDir'
+                    glm::vec3 axis = glm::cross(up, velDir);
+                    float angle = acos(glm::clamp(glm::dot(up, velDir), -1.0f, 1.0f));
+                    
+                    if (glm::length(axis) > 0.0001f) {
+                        rocketModel = glm::rotate(rocketModel, angle, glm::normalize(axis));
+                    } else if (glm::dot(up, velDir) < 0.0f) {
+                        // Edge case: moving straight down, flip 180 degrees
+                        rocketModel = glm::rotate(rocketModel, glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+                    }
+                }
+                
+                // Scale the rocket so its center is balanced and sized correctly
+                rocketModel = glm::scale(rocketModel, glm::vec3(solarSystem[i].radius));
+                // Shift it down slightly so the "center of mass" isn't at the very bottom base
+                rocketModel = glm::translate(rocketModel, glm::vec3(0.0f, -2.0f, 0.0f)); 
+
+                glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(rocketModel));
+                
+                // Disable textures for the rocket to use custom colors
+                glUniform1i(useTextureLoc, 0);
+                glUniform1i(hasNightLoc, 0);
+                glUniform1i(hasSpecLoc, 0);
+
+                // 1. Draw Body (Dark Gray)
+                glUniform3f(colorLoc, 0.4f, 0.4f, 0.4f);
+                glDrawElements(GL_TRIANGLES, rocketBodyCount, GL_UNSIGNED_INT, 0);
+                
+                // 2. Draw Cone (Light Gray / Silver)
+                glUniform3f(colorLoc, 0.8f, 0.8f, 0.8f);
+                // Use an offset pointer to start drawing where the body indices ended
+                glDrawElements(GL_TRIANGLES, rocketConeCount, GL_UNSIGNED_INT, (void*)(rocketBodyCount * sizeof(unsigned int)));
+                
+                //rebind the standard planet VAO for the next iterations
+                glBindVertexArray(VAO);
+            } else {
+                //standard planet rendering
+                glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
+            }
 
             //corona drawing
             if(i==2){  //check for sun
@@ -662,7 +743,7 @@ void processInput(GLFWwindow *window, std::vector<Planet> &solarSystem)
         glm::vec3 direction = glm::normalize(solarSystem[3].velocity);
         glm::vec3 dir2 = cameraFront; 
         
-        float thrust2 = 5.0f * deltaTime; 
+        float thrust2 = 2.0f * deltaTime; 
 
         if(glfwGetKey(window, GLFW_KEY_I) == GLFW_PRESS){
             solarSystem[3].velocity += dir2 * thrust2;
@@ -843,6 +924,92 @@ void generateSphere(float radius, int sectors, int stacks, std::vector<float> &v
             }
         }
     }
+}
+
+//rocket gemoetry function
+void generateRocketGeometry(float radius, float bodyHeight, float coneHeight, int sectors, 
+                            std::vector<float> &vertices, std::vector<unsigned int> &indices, 
+                            int &bodyIndexCount, int &coneIndexCount) 
+{
+    vertices.clear();
+    indices.clear();
+
+    //cylinder sides
+    for(int i = 0; i <= sectors; i++) {
+        float angle = (float)i / sectors * 2.0f * M_PI;
+        float x = cos(angle) * radius;
+        float z = sin(angle) * radius;
+        float nx = cos(angle), nz = sin(angle); 
+        
+        vertices.push_back(x); vertices.push_back(0.0f); vertices.push_back(z);
+        vertices.push_back(nx); vertices.push_back(0.0f); vertices.push_back(nz);
+        vertices.push_back(0.0f); vertices.push_back(0.0f); 
+        
+        vertices.push_back(x); vertices.push_back(bodyHeight); vertices.push_back(z);
+        vertices.push_back(nx); vertices.push_back(0.0f); vertices.push_back(nz);
+        vertices.push_back(0.0f); vertices.push_back(1.0f); 
+    }
+    
+    for(int i = 0; i < sectors; i++) {
+        int bl = i * 2;         
+        int tl = i * 2 + 1;     
+        int br = (i + 1) * 2;   
+        int tr = (i + 1) * 2 + 1; 
+        indices.push_back(bl); indices.push_back(br); indices.push_back(tl);
+        indices.push_back(tl); indices.push_back(br); indices.push_back(tr);
+    }
+    
+    //cylinder base
+    int baseCenter = vertices.size() / 8;
+    vertices.push_back(0.0f); vertices.push_back(0.0f); vertices.push_back(0.0f);
+    vertices.push_back(0.0f); vertices.push_back(-1.0f); vertices.push_back(0.0f); 
+    vertices.push_back(0.5f); vertices.push_back(0.5f);
+    
+    int baseEdge = vertices.size() / 8;
+    for(int i = 0; i <= sectors; i++) {
+        float angle = (float)i / sectors * 2.0f * M_PI;
+        float x = cos(angle) * radius;
+        float z = sin(angle) * radius;
+        vertices.push_back(x); vertices.push_back(0.0f); vertices.push_back(z);
+        vertices.push_back(0.0f); vertices.push_back(-1.0f); vertices.push_back(0.0f);
+        vertices.push_back(0.0f); vertices.push_back(0.0f);
+    }
+    for(int i = 0; i < sectors; i++) {
+        indices.push_back(baseCenter);
+        indices.push_back(baseEdge + i + 1);
+        indices.push_back(baseEdge + i);
+    }
+    
+    bodyIndexCount = indices.size(); 
+
+    //cone nose
+    int coneApex = vertices.size() / 8;
+    vertices.push_back(0.0f); vertices.push_back(bodyHeight + coneHeight); vertices.push_back(0.0f);
+    vertices.push_back(0.0f); vertices.push_back(1.0f); vertices.push_back(0.0f); 
+    vertices.push_back(0.5f); vertices.push_back(1.0f);
+    
+    int coneBase = vertices.size() / 8;
+    float coneNy = radius / coneHeight;
+    for(int i = 0; i <= sectors; i++) {
+        float angle = (float)i / sectors * 2.0f * M_PI;
+        float x = cos(angle) * radius;
+        float z = sin(angle) * radius;
+        float nx = cos(angle);
+        float nz = sin(angle);
+        float len = sqrt(nx*nx + coneNy*coneNy + nz*nz);
+        
+        vertices.push_back(x); vertices.push_back(bodyHeight); vertices.push_back(z);
+        vertices.push_back(nx/len); vertices.push_back(coneNy/len); vertices.push_back(nz/len);
+        vertices.push_back(0.0f); vertices.push_back(0.0f);
+    }
+    
+    for(int i = 0; i < sectors; i++) {
+        indices.push_back(coneApex);
+        indices.push_back(coneBase + i);
+        indices.push_back(coneBase + i + 1);
+    }
+    
+    coneIndexCount = indices.size() - bodyIndexCount; 
 }
 
 void mouse_callback(GLFWwindow *window, double xposIn, double yposIn)
