@@ -17,6 +17,7 @@ add_executable(gravity_sim
     src/main.cpp
     src/Shader.cpp
     src/Camera.cpp
+    src/Geometry.cpp
     src/glad.c
 )
 
