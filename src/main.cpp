@@ -8,6 +8,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
+#include "../include/Shader.h"
 
 struct Planet
 {   
@@ -24,144 +25,6 @@ struct Planet
     unsigned int nightTextureID = 0;
     unsigned int specularMapID = 0;
 };
-
-// vertex shader
-const char *vertexShaderSource = R"(
-#version 330 core
-layout (location = 0) in vec3 aPos;
-layout (location = 1) in vec3 aNormal;
-layout (location = 2) in vec2 aTexCoords; //UV coords
-
-out vec3 FragPos;
-out vec3 Normal;
-out vec2 TexCoords;
-
-uniform mat4 model;
-uniform mat4 view;
-uniform mat4 projection;
-
-void main() {
-        //calc location of vertex in world space
-    FragPos = vec3(model * vec4(aPos, 1.0));
-    
-        //correct normal vector if planet is scaled or rotated
-    Normal = mat3(transpose(inverse(model))) * aNormal;
-    TexCoords = aTexCoords;
-
-    gl_Position = projection * view * model * vec4(aPos, 1.0);
-}
-)";
-
-// fragment shader
-const char *fragmentShaderSource = R"(
-#version 330 core
-
-
-uniform sampler2D planetTexture;
-uniform sampler2D nightTexture;
-uniform sampler2D specularMap;
-
-uniform vec3 pColor;
-uniform bool useTexture;
-uniform bool isCloud;
-uniform bool hasNightTexture;
-uniform bool hasSpecularMap;
-
-uniform vec3 lightPos; //position of light source
-uniform vec3 viewPos; //position of camera
-uniform bool isSun; //is current object being rendered the light source?
-uniform bool isCorona; // glow toggle
-
-in vec3 FragPos;
-in vec3 Normal;
-in vec2 TexCoords;
-
-out vec4 FragColor;
-
-void main(){
-        //corona glow rendering
-    if (isCorona) {
-        vec3 norm = normalize(Normal);
-        vec3 viewDir = normalize(viewPos - FragPos);
-        
-            // Intensity is 1.0 at the center, 0.0 at the grazing edges
-        float intensity = max(dot(norm, viewDir), 0.0);
-        
-            // Cube the intensity so the glow fades smoothly but stays tight to the sun
-        float alpha = pow(intensity, 3.0);
-        
-            // Multiply alpha by 0.6 so the center isn't 100% solid, allowing the Sun texture to peek through!
-        FragColor = vec4(pColor, alpha * 0.6);
-        return;
-    }
-        //normal rendering
-    vec4 texData = texture(planetTexture, TexCoords);
-    vec3 objectColor = texData.rgb;
-    float alpha = texData.a;
-    
-    if (useTexture) {
-        vec4 texData = texture(planetTexture, TexCoords);
-        objectColor = texData.rgb;
-        alpha = texData.a;
-        
-            //cloud hack
-        if (isCloud) {
-                // Use the redness/brightness of the image as the transparency!
-                // Black background = 0.0 (Invisible). White clouds = 1.0 (Solid).
-            alpha = texData.r; 
-            objectColor = vec3(1.0); // Force the clouds to be pure white
-        }
-    }else{
-        objectColor = pColor;
-    }
-
-    if(isSun){
-        FragColor = vec4(objectColor * 5.0, alpha);
-        return;
-    }
-    
-        //ambient lighting
-    float ambientStrength = 0.10;
-    vec3 ambient = ambientStrength * vec3(1.0);
-
-        //diffuse lighting
-    vec3 norm = normalize(Normal);
-    vec3 lightDir = normalize(lightPos - FragPos);
-    float nDotL = dot(norm, lightDir);
-    float diff = max(nDotL, 0.0);
-    vec3 diffuse = diff * vec3(1.0);
-
-        //specular lighting
-    float specularStrength = 0.2;
-    if (hasSpecularMap && !isCloud) {
-            // We only need the 'r' (red) channel because the image is black and white
-        float specMask = texture(specularMap, TexCoords).r; 
-        
-            // Multiply our strength by the mask. 
-            // Oceans (1.0) stay 0.2 shiny. Land (0.0) becomes 0.0 shiny!
-        specularStrength *= specMask; 
-    }
-    if (isCloud) { specularStrength = 0.0; }
-    vec3 viewDir = normalize(viewPos - FragPos);
-    vec3 reflectDir = reflect(-lightDir, norm);  
-    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 16);
-    vec3 specular = specularStrength * spec * vec3(1.0);
-        // Note: The Moon shouldn't be very shiny, but Earth's oceans should! We keep it simple for now.
-
-    vec3 result = (ambient + diffuse + specular) * objectColor;
-    if (hasNightTexture && !isCloud) {
-        vec3 nightColor = texture(nightTexture, TexCoords).rgb;
-        
-            // smoothstep creates a soft twilight gradient at the terminator line.
-            // When nDotL is 0.1 (twilight), blend starts. When -0.2 (night), blend is 1.0.
-        float nightBlend = smoothstep(0.1, -0.2, nDotL); 
-        
-            // Add the glowing city lights on top of the dark surface!
-        result += nightColor * nightBlend;
-    }
-    FragColor = vec4(result, alpha);
-}
-)";
 
 int windowWidth = 1920;
 int windowHeight = 1080;
@@ -193,7 +56,6 @@ float lastFrame = 0.0f;
 
 // prototypes
 GLFWwindow *StartGLFW();
-unsigned int compileShader();
 unsigned int loadTexture(char const * path);
 void processInput(GLFWwindow *window, std::vector<Planet> &solarSystem);
 void framebuffer_size_callback(GLFWwindow *window, int width, int height);
@@ -288,12 +150,12 @@ int main()
 
     // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
-    unsigned int shaderProgram = compileShader();
+    Shader lightingShader("../assets/shaders/vertex_core.glsl", "../assets/shaders/fragment_core.glsl");
 
-    glUseProgram(shaderProgram);
-    glUniform1i(glGetUniformLocation(shaderProgram, "planetTexture"), 0); // Slot 0
-    glUniform1i(glGetUniformLocation(shaderProgram, "nightTexture"), 1);  // Slot 1
-    glUniform1i(glGetUniformLocation(shaderProgram, "specularMap"), 2); //Slot 2
+    lightingShader.use();
+    lightingShader.setInt("planetTexture", 0); 
+    lightingShader.setInt("nightTexture", 1);  
+    lightingShader.setInt("specularMap", 2);
 
     std::vector<Planet> solarSystem;
 
@@ -313,10 +175,10 @@ int main()
     earth.axialTilt = 23.4f;
     earth.rotationSpeedFactor = 1.0f;
     earth.color = glm::vec3(0.2f, 0.5f, 1.0f);
-    earth.textureID = loadTexture("../textures/earth_8k.jpg");
-    earth.cloudTextureID = loadTexture("../textures/clouds_8k.png");
-    earth.nightTextureID = loadTexture("../textures/night_8k.jpg");
-    earth.specularMapID = loadTexture("../textures/earth_specular.png");
+    earth.textureID = loadTexture("../assets/textures/earth_8k.jpg");
+    earth.cloudTextureID = loadTexture("../assets/textures/clouds_8k.png");
+    earth.nightTextureID = loadTexture("../assets/textures/night_8k.jpg");
+    earth.specularMapID = loadTexture("../assets/textures/earth_specular.png");
     solarSystem.push_back(earth);
     
     Planet moon;
@@ -328,7 +190,7 @@ int main()
     moon.mass = 0.0123f;
     moon.radius = 0.273f;
     moon.color = glm::vec3(0.749f, 0.764f, 0.800f);
-    moon.textureID = loadTexture("../textures/moon.jpg");
+    moon.textureID = loadTexture("../assets/textures/moon.jpg");
     solarSystem.push_back(moon);
     
     Planet sun;
@@ -340,10 +202,10 @@ int main()
     sun.mass = 333000.0f; 
     sun.radius = 109.0f;
     sun.color = glm::vec3(1.0f, 0.8f, 0.0f);
-    sun.textureID = loadTexture("../textures/sun.jpg");
+    sun.textureID = loadTexture("../assets/textures/sun.jpg");
     solarSystem.push_back(sun);
 
-    unsigned int skyboxTexture = loadTexture("../textures/milkyway_8k.jpg");
+    unsigned int skyboxTexture = loadTexture("../assets/textures/milkyway_8k.jpg");
 
     // 4. THE ROCKET (Artemis II)
     Planet rocket;
@@ -386,7 +248,7 @@ int main()
         // glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        glUseProgram(shaderProgram);
+        lightingShader.use();
         glBindVertexArray(VAO);
 
         // applying gravity
@@ -447,30 +309,11 @@ int main()
         float aspect = (float)windowWidth / (float)windowHeight;
         projection = glm::perspective(glm::radians(fov), aspect, 0.1f, 10000000.0f);
 
-        // sending matrices to vertex shader
-        int viewLoc = glGetUniformLocation(shaderProgram, "view");
-        glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
-
-        int projLoc = glGetUniformLocation(shaderProgram, "projection");
-        glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
-
-        int modelLoc = glGetUniformLocation(shaderProgram, "model");
-        int colorLoc = glGetUniformLocation(shaderProgram, "pColor");
-        
-        //get the lighting uniform locations
-        int lightPosLoc = glGetUniformLocation(shaderProgram, "lightPos");
-        int viewPosLoc = glGetUniformLocation(shaderProgram, "viewPos");
-        int isSunLoc = glGetUniformLocation(shaderProgram, "isSun");
-
-        int useTextureLoc = glGetUniformLocation(shaderProgram, "useTexture");
-        int isCloudLoc = glGetUniformLocation(shaderProgram, "isCloud");
-        int hasNightLoc = glGetUniformLocation(shaderProgram, "hasNightTexture");
-        int isCoronaLoc = glGetUniformLocation(shaderProgram, "isCorona");
-        int hasSpecLoc = glGetUniformLocation(shaderProgram, "hasSpecularMap");
-        // Send Camera and Sun position to the shader
-        glUniform3fv(viewPosLoc, 1, glm::value_ptr(cameraPos));
-        glUniform3fv(lightPosLoc, 1, glm::value_ptr(solarSystem[2].position)); // Sun is index 2
-        // glm::vec3 customAxis = glm::normalize(glm::vec3(0.4f, 1.0f, 0.1f));
+        lightingShader.setMat4("view", view);
+        lightingShader.setMat4("projection", projection);
+        lightingShader.setVec3("viewPos", cameraPos);
+        // Send Camera and Sun position to the shader (Sun is index 2)
+        lightingShader.setVec3("lightPos", solarSystem[2].position);
 
         // ----------milkyway rending-----------------
         // 1. Turn off Depth Writing! 
@@ -486,13 +329,13 @@ int main()
         // 3. Make it ridiculously massive
         skyboxModel = glm::scale(skyboxModel, glm::vec3(500000.0f)); 
 
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(skyboxModel));
+        lightingShader.setMat4("model", skyboxModel);
 
-        // 4. Configure the shader toggles
-        glUniform1i(isSunLoc, 1);        // Treat it like the Sun (skip shadows, draw full brightness)
-        glUniform1i(useTextureLoc, 1);   // Use an image
-        glUniform1i(isCloudLoc, 0);      // No transparent cloud math
-        glUniform1i(hasNightLoc, 0);     // No city lights
+        // configure the shader toggles
+        lightingShader.setInt("isSun", 1);        // Treat it like the Sun (skip shadows, draw full brightness)
+        lightingShader.setInt("useTexture", 1);        // Use an image
+        lightingShader.setInt("isCloud", 0);        // No transparent cloud math
+        lightingShader.setInt("hasNightTexture", 0);        // No city lights
 
         // 5. Bind the Milky Way texture
         glActiveTexture(GL_TEXTURE0);
@@ -513,12 +356,12 @@ int main()
                 glBufferData(GL_ARRAY_BUFFER, solarSystem[i].trail.size() * sizeof(glm::vec3), solarSystem[i].trail.data(), GL_DYNAMIC_DRAW);
                 
                 glm::mat4 trailModel = glm::mat4(1.0f);
-                glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(trailModel));
-                glUniform3fv(colorLoc, 1, glm::value_ptr(solarSystem[i].color));
+                lightingShader.setMat4("model", trailModel);
+                lightingShader.setVec3("pColor", solarSystem[i].color);
 
-                glUniform1i(isSunLoc, 1);
-                glUniform1i(useTextureLoc, 0);
-                glUniform1i(isCloudLoc, 0);
+                lightingShader.setInt("isSun", 1);
+                lightingShader.setInt("useTexture", 0);
+                lightingShader.setInt("isCloud", 0);
 
                 glPointSize(2.0f);
                 glDrawArrays(GL_LINE_STRIP, 0, solarSystem[i].trail.size());
@@ -529,10 +372,10 @@ int main()
             glm::mat4 model = glm::mat4(1.0f);
 
             if(i==2){
-                glUniform1i(isSunLoc, 1); // True
+                lightingShader.setInt("isSun", 1); // True
             } 
             else{
-                glUniform1i(isSunLoc, 0); // False
+                lightingShader.setInt("isSun", 0); // False
             }
 
             // apply transformations = read backwards: scale -> rotate -> translate
@@ -542,12 +385,12 @@ int main()
             model = glm::rotate(model, ((float)glfwGetTime() / 2.0f) / solarSystem[i].rotationSpeedFactor, glm::vec3(0.0f, 0.0f, 1.0f));
             model = glm::scale(model, glm::vec3(solarSystem[i].radius));
 
-            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-            glUniform3fv(colorLoc, 1, glm::value_ptr(solarSystem[i].color));
+            lightingShader.setMat4("model", model);
+            lightingShader.setVec3("pColor", solarSystem[i].color);
 
             //texture binding
             if (solarSystem[i].textureID != 0){
-                glUniform1i(useTextureLoc, 1); 
+                lightingShader.setInt("useTexture", 1);
                 
                 // Bind Day Texture to Slot 0
                 glActiveTexture(GL_TEXTURE0);
@@ -555,28 +398,28 @@ int main()
 
                 // Bind Night Texture to Slot 1 (If it exists)
                 if (solarSystem[i].nightTextureID != 0) {
-                    glUniform1i(hasNightLoc, 1);
+                    lightingShader.setInt("hasNightTexture", 1);
                     glActiveTexture(GL_TEXTURE1);
                     glBindTexture(GL_TEXTURE_2D, solarSystem[i].nightTextureID);
                 } else {
-                    glUniform1i(hasNightLoc, 0);
+                    lightingShader.setInt("hasNightTexture", 0);
                 }
                 //Bind Specular Texture to Slot 2
                 if (solarSystem[i].specularMapID != 0) {
-                    glUniform1i(hasSpecLoc, 1);
+                    lightingShader.setInt("hasSpecularMap", 1);
                     glActiveTexture(GL_TEXTURE2);
                     glBindTexture(GL_TEXTURE_2D, solarSystem[i].specularMapID);
                 } else {
-                    glUniform1i(hasSpecLoc, 0);
+                    lightingShader.setInt("hasSpecularMap", 0);
                 }
 
             } else {
-                glUniform1i(useTextureLoc, 0); 
-                glUniform1i(hasNightLoc, 0); 
-                glUniform1i(hasSpecLoc, 0); 
+                lightingShader.setInt("useTexture", 0);
+                lightingShader.setInt("hasNightTexture", 0);
+                lightingShader.setInt("hasSpecularMap", 0);     
             }
 
-            glUniform1i(isCloudLoc, 0);
+            lightingShader.setInt("isCloud", 0);
 
             if (i == 3) {
                 //rocket rendering
@@ -607,19 +450,19 @@ int main()
                 // Shift it down slightly so the "center of mass" isn't at the very bottom base
                 rocketModel = glm::translate(rocketModel, glm::vec3(0.0f, -2.0f, 0.0f)); 
 
-                glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(rocketModel));
+                lightingShader.setMat4("model", rocketModel);
                 
                 // Disable textures for the rocket to use custom colors
-                glUniform1i(useTextureLoc, 0);
-                glUniform1i(hasNightLoc, 0);
-                glUniform1i(hasSpecLoc, 0);
+                lightingShader.setInt("useTexture", 0);
+                lightingShader.setInt("hasNightTexture", 0);
+                lightingShader.setInt("hasSpecularMap", 0);
 
                 // 1. Draw Body (Dark Gray)
-                glUniform3f(colorLoc, 0.4f, 0.4f, 0.4f);
+                lightingShader.setVec3("pColor", 0.4f, 0.4f, 0.4f);
                 glDrawElements(GL_TRIANGLES, rocketBodyCount, GL_UNSIGNED_INT, 0);
                 
                 // 2. Draw Cone (Light Gray / Silver)
-                glUniform3f(colorLoc, 0.8f, 0.8f, 0.8f);
+                lightingShader.setVec3("pColor", 0.8f, 0.8f, 0.8f);
                 // Use an offset pointer to start drawing where the body indices ended
                 glDrawElements(GL_TRIANGLES, rocketConeCount, GL_UNSIGNED_INT, (void*)(rocketBodyCount * sizeof(unsigned int)));
                 
@@ -638,15 +481,15 @@ int main()
                 // Scale it up so it acts like an atmosphere extending into space
                 coronaModel = glm::scale(coronaModel, glm::vec3(solarSystem[i].radius * 1.6f)); 
 
-                glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(coronaModel));
+                lightingShader.setMat4("model", coronaModel);
                 
                 // Turn OFF standard textures and turn ON the Corona math
-                glUniform1i(useTextureLoc, 0); 
-                glUniform1i(isSunLoc, 0); 
-                glUniform1i(isCoronaLoc, 1);
+                lightingShader.setInt("useTexture", 0);
+                lightingShader.setInt("isSun", 0); 
+                lightingShader.setInt("isCorona", 1);
                 
                 // Set the glow to a bright, hot fiery orange
-                glUniform3f(colorLoc, 1.0f, 0.6f, 0.0f); 
+                lightingShader.setVec3("pColor", 1.0f, 0.6f, 0.0f);
 
                 // CRITICAL: Disable depth writing so the transparent glow 
                 // doesn't block out the stars or trails behind it!
@@ -655,7 +498,7 @@ int main()
                 glDepthMask(GL_TRUE); // Turn it back on for the next planet
                 
                 // Reset the corona switch
-                glUniform1i(isCoronaLoc, 0);
+                lightingShader.setInt("isCorona", 0);
             }
 
             //cloud drawing
@@ -670,12 +513,12 @@ int main()
                 cloudModel = glm::rotate(cloudModel, ((float)glfwGetTime() / 2.0f) * cloudSpeed, glm::vec3(0.0f, 0.0f, 1.0f));
                 cloudModel = glm::scale(cloudModel, glm::vec3(solarSystem[i].radius * 1.00313f));
 
-                glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(cloudModel));
+                lightingShader.setMat4("model", cloudModel);
                 
-                glUniform1i(useTextureLoc, 1);
-                glUniform1i(isCloudLoc, 1); //  Activate the transparent cloud hack!
-                glUniform1i(hasNightLoc, 0); //disable city lights for clouds
-                glUniform1i(hasSpecLoc, 0); //disable spec map for clouds
+                lightingShader.setInt("useTexture", 1);
+                lightingShader.setInt("isCloud", 1); //  Activate the transparent cloud hack!
+                lightingShader.setInt("hasNightTexture", 0); //disable city lights for clouds
+                lightingShader.setInt("hasSpecularMap", 0); //disable spec map for clouds
 
                 glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, solarSystem[i].cloudTextureID);
@@ -704,6 +547,7 @@ GLFWwindow *StartGLFW()
     glfwMakeContextCurrent(window);
     return window;
 }
+
 // input handling
 void processInput(GLFWwindow *window, std::vector<Planet> &solarSystem)
 {
@@ -803,37 +647,6 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 
     windowWidth = width;
     windowHeight = height;
-}
-
-// void resize(GLFWwindow* window){
-//     //resizing
-//     int framebuffer_width, framebuffer_height;
-//     glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
-//     glViewport(0, 0, framebuffer_width, framebuffer_height);
-//     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-// }
-
-unsigned int compileShader()
-{
-    // Compile shaders
-    unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
-    glCompileShader(vertexShader);
-
-    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
-    glCompileShader(fragmentShader);
-
-    // Link shader program
-    unsigned int shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
-
-    return shaderProgram;
 }
 
 //texture loading function

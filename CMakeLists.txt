@@ -15,6 +15,7 @@ include_directories(${GLFW_INCLUDE_DIRS})
 # Add executable (glad.c must be compiled with your project)
 add_executable(gravity_sim
     src/main.cpp
+    src/Shader.cpp
     src/glad.c
 )
 
