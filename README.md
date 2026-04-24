@@ -130,8 +130,6 @@ make
 
     Left Ctrl - Move Down
 
-    Left Shift - Hold to increase camera flight speed (currently only for moving up and down vertically)
-
     Mouse Scroll - Adjust Field of View (FOV)
 
 ### Rocket Controls (Artemis II)
@@ -150,24 +148,44 @@ You can pilot the rocket while in either camera mode!
 ## 📂 File Structure
 ```
 .
-├── CMakeLists.txt           # Build configuration
-├── assets/                  # External media and shaders
-│   ├── shaders/             # GLSL Source Code for shaders
-│   │   ├── fragment_core.glsl
-│   │   └── vertex_core.glsl
-│   └── textures/            # High-res 8k planet & skybox textures
-|
-├── include/                 # Header files
-│   ├── Shader.h             # Custom shader compilation class
-│   ├── KHR/
-│   │   └── khrplatform.h
-│   └── glad/
-│       └── glad.h
-|
-└── src/                     # Source files
-    ├── main.cpp             # Simulation loop and physics integration
-    ├── Shader.cpp           # Shader implementation
-    └── glad.c               # OpenGL loader
+├── CMakeLists.txt
+├── README.md
+├── assets
+│   ├── shaders
+│   │   ├── fragment_core.glsl
+│   │   └── vertex_core.glsl
+│   └── textures
+│       ├── clouds.png
+│       ├── clouds_8k.png
+│       ├── earth.jpg
+│       ├── earth_8k.jpg
+│       ├── earth_specular.png
+│       ├── milkyway.jpg
+│       ├── milkyway_8k.jpg
+│       ├── moon.jpg
+│       ├── night.jpg
+│       ├── night_8k.jpg
+│       ├── stars.jpg
+│       └── sun.jpg
+├── include
+│   ├── Camera.h
+│   ├── Geometry.h
+│   ├── Physics.h
+│   ├── Planet.h
+│   ├── Shader.h
+│   ├── TextureLoader.h
+│   ├── KHR
+│   │   └── khrplatform.h
+│   └── glad
+│       └── glad.h
+└── src
+    ├── Camera.cpp
+    ├── Geometry.cpp
+    ├── Physics.cpp
+    ├── Shader.cpp
+    ├── TextureLoader.cpp
+    ├── glad.c
+    └── main.cpp
 ```
 ---
 
