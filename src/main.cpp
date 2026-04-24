@@ -6,14 +6,13 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb/stb_image.h>
 
 #include "../include/Shader.h"
 #include "../include/Camera.h"
 #include "../include/Planet.h"
 #include "../include/Geometry.h"
 #include "../include/Physics.h"
+#include "../include/TextureLoader.h"
 
 int windowWidth = 1920;
 int windowHeight = 1080;
@@ -37,7 +36,6 @@ Camera camera(glm::vec3(0.0f, 5.0f, 10.0f), glm::vec3(0.0f, 1.0f, 0.0f), -90.0f,
 
 // prototypes
 GLFWwindow *StartGLFW();
-unsigned int loadTexture(char const * path);
 void processInput(GLFWwindow *window, std::vector<Planet> &solarSystem);
 void framebuffer_size_callback(GLFWwindow *window, int width, int height);
 void mouse_callback(GLFWwindow *window, double xposIn, double yposIn);
@@ -532,36 +530,6 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 
     windowWidth = width;
     windowHeight = height;
-}
-
-//texture loading function
-unsigned int loadTexture(char const * path) {
-    unsigned int textureID;
-    glGenTextures(1, &textureID);
-
-    int width, height, nrComponents;
-    stbi_set_flip_vertically_on_load(true); 
-    
-    // Notice the '4' at the end! This forces stb_image to output RGBA every time.
-    unsigned char *data = stbi_load(path, &width, &height, &nrComponents, 4); 
-    
-    if (data) {
-        glBindTexture(GL_TEXTURE_2D, textureID);
-        // We now safely assume GL_RGBA for everything
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-        glGenerateMipmap(GL_TEXTURE_2D);
-
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-        stbi_image_free(data);
-    } else {
-        std::cout << "Texture failed to load at path: " << path << std::endl;
-        stbi_image_free(data);
-    }
-    return textureID;
 }
 
 void mouse_callback(GLFWwindow *window, double xposIn, double yposIn) {
