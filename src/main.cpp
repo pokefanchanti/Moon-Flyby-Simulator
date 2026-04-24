@@ -13,6 +13,7 @@
 #include "../include/Camera.h"
 #include "../include/Planet.h"
 #include "../include/Geometry.h"
+#include "../include/Physics.h"
 
 int windowWidth = 1920;
 int windowHeight = 1080;
@@ -137,13 +138,9 @@ int main()
 
     std::vector<Planet> solarSystem;
 
-    // --- NORMALIZED ENGINE UNITS ---
+    // --- NORMALIZED UNITS ---
     // 1 Distance Unit = 1 Earth Radius
     // 1 Mass Unit = 1 Earth Mass
-
-    // 149.6 * 10^6 km
-    // 6378 km
-    // 23455.63f
 
     Planet earth;
     earth.position = glm::vec3(0.0f, 0.0f, 0.0f);
@@ -163,7 +160,6 @@ int main()
     moon.position = glm::vec3(0.0f, 0.0f, -60.3f);
     moon.velocity = glm::vec3(0.0f, 0.0f, 0.0f);
     moon.axialTilt = 6.63f;
-    // moon.velocity = glm::vec3(0.0f, 0.0f, -1.3f);
     moon.rotationSpeedFactor = 27.3f;
     moon.mass = 0.0123f;
     moon.radius = 0.273f;
@@ -174,7 +170,6 @@ int main()
     Planet sun;
     sun.position = glm::vec3(0.0f, 0.0f, -23455.63f);
     sun.velocity = glm::vec3(0.0f, 0.0f, 0.0f);
-    // sun.mass = 0.1f;
     sun.axialTilt=7.0f;
     sun.rotationSpeedFactor=25.67f;
     sun.mass = 333000.0f; 
@@ -185,16 +180,14 @@ int main()
 
     unsigned int skyboxTexture = loadTexture("../assets/textures/milkyway_8k.jpg");
 
-    // 4. THE ROCKET (Artemis II)
+    //rocket
     Planet rocket;
-    // Start it in Low Earth Orbit (LEO) - slightly above the Earth's surface
-    // Earth radius is 1.0, so we put the rocket at 1.05
     rocket.position = glm::vec3(0.0f, 0.0f, 1.05f); 
     rocket.velocity = glm::vec3(0.0f, 0.0f, 0.0f);
     rocket.axialTilt = 0.0f;
-    rocket.mass = 0.000000001f; // Effectively zero mass
-    rocket.radius = 0.00625f;    // Exaggerated visual size so we can see it
-    rocket.color = glm::vec3(0.0f, 1.0f, 0.0f); // Bright green!
+    rocket.mass = 0.000000001f; 
+    rocket.radius = 0.00625f;  
+    rocket.color = glm::vec3(0.0f, 1.0f, 0.0f);
     solarSystem.push_back(rocket);
 
     // float G = 6.674f*pow(10,-11);
@@ -203,10 +196,12 @@ int main()
 
     float moonOrbitVel = sqrt((G * earth.mass) / abs(moon.position.z));
     solarSystem[1].velocity = glm::vec3(moonOrbitVel, 0.0f, 0.0f);
-    // Calculate orbital velocity for the Rocket in LEO
+    // calculate orbital velocity for the Rocket in LEO
     float rocketOrbitVel = sqrt((G * earth.mass) / abs(rocket.position.z));
     solarSystem[3].velocity = glm::vec3(-rocketOrbitVel, 0.0f, 0.0f);
 
+
+    // ---RENDER LOOP---
     while (!glfwWindowShouldClose(window))
     {
         float currentFrame = glfwGetTime();
@@ -216,45 +211,16 @@ int main()
         processInput(window, solarSystem);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        // glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         lightingShader.use();
         glBindVertexArray(VAO);
 
-        // applying gravity
-        for (size_t i = 0; i < solarSystem.size(); i++){
-            if(i==2) continue; //skip the sun
-            for (size_t j = 0; j < solarSystem.size(); j++){
-                if(i==j) continue; // same planet
-                if(j==2) continue; //skip the sun
-                if(i==0 && j==1) continue; //earth pulled by moon
-                glm::vec3 direction = solarSystem[j].position - solarSystem[i].position;
-                float distance = glm::length(direction);
+        // ---UPDATE SIMULATION PHYSICS---
+        // i.e update the gravity and velocities for each planet
+        updatePhysics(solarSystem, dt, G);
 
-                // prevent by zero division
-                if (distance > 0.5f)
-                {
-                    glm::vec3 normalizedDir = glm::normalize(direction);
-                    float force = (G * solarSystem[i].mass * solarSystem[j].mass) / (distance * distance);
-                    glm::vec3 acceleration = (normalizedDir * force) / solarSystem[i].mass;
-                    solarSystem[i].velocity += acceleration * dt;
-                }
-
-                // collision
-                //  if(distance<=solarSystem[i].radius+solarSystem[j].radius){
-                //      solarSystem[i].velocity*=glm::vec3(-1.0f,-1.0f,1.0f);
-                //  }
-            }
-        }
-
-        // applying velocity to position
-        for (size_t i = 0; i < solarSystem.size(); i++){
-            solarSystem[i].position += solarSystem[i].velocity * dt;
-            solarSystem[i].trail.push_back(solarSystem[i].position);
-        }
-
-        //camera positioning math
+        // ---CAMERA POSITIONING MATH---
         glm::mat4 view = camera.GetViewMatrix(solarSystem[camera.targetIndex].position, solarSystem[camera.targetIndex].radius);
         
         float aspect = (float)windowWidth / (float)windowHeight;
@@ -267,9 +233,8 @@ int main()
         // Send Camera and Sun position to the shader (Sun is index 2)
         lightingShader.setVec3("lightPos", solarSystem[2].position);
 
-        // MILKYWAY rending
-        // turn off Depth Writing 
-        // "Draw this, but pretend it is infinitely far away, so everything else draws on top of it"
+        // ---MILKYWAY RENDERING---
+        // turn off Depth Writing i.e "draw this, but pretend it is infinitely far away, so everything else draws on top of it"
         glDepthMask(GL_FALSE); 
         
         glBindVertexArray(VAO);
@@ -277,7 +242,6 @@ int main()
         
         // Lock the sphere to the Camera's exact position so we can never reach the edge
         skyboxModel = glm::translate(skyboxModel, camera.Position);
-        // Make it ridiculously massive
         skyboxModel = glm::scale(skyboxModel, glm::vec3(500000.0f)); 
 
         lightingShader.setMat4("model", skyboxModel);
@@ -291,12 +255,12 @@ int main()
         // Bind the Milky Way texture
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, skyboxTexture);
-        // Draw the giant sphere
         glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
-        // Turn Depth Writing back on so the planets render normally!
+
         glDepthMask(GL_TRUE);
 
 
+        // ---DRAWING LOOP---
         for (size_t i = 0; i < solarSystem.size(); i++){
             //drawing trail
             if (showOrbit && !solarSystem[i].trail.empty()){
@@ -322,13 +286,13 @@ int main()
             glm::mat4 model = glm::mat4(1.0f);
 
             if(i==2){
-                lightingShader.setInt("isSun", 1); // True
+                lightingShader.setInt("isSun", 1); 
             } 
             else{
-                lightingShader.setInt("isSun", 0); // False
+                lightingShader.setInt("isSun", 0); 
             }
 
-            // apply transformations = read backwards: scale -> rotate -> translate
+            // MVP Transforms
             model = glm::translate(model, solarSystem[i].position);
             model = glm::rotate(model, glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             model = glm::rotate(model, glm::radians(90.0f + solarSystem[i].axialTilt), glm::vec3(1.0f, 0.0f, 0.0f));
@@ -338,7 +302,7 @@ int main()
             lightingShader.setMat4("model", model);
             lightingShader.setVec3("pColor", solarSystem[i].color);
 
-            //texture binding
+            //---TEXTURE BINDING---
             if (solarSystem[i].textureID != 0){
                 lightingShader.setInt("useTexture", 1);
                 
@@ -346,7 +310,7 @@ int main()
                 glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, solarSystem[i].textureID);
 
-                // Bind Night Texture to Slot 1 (If it exists)
+                // Bind Night Texture to Slot 1 
                 if (solarSystem[i].nightTextureID != 0) {
                     lightingShader.setInt("hasNightTexture", 1);
                     glActiveTexture(GL_TEXTURE1);
@@ -370,9 +334,9 @@ int main()
             }
 
             lightingShader.setInt("isCloud", 0);
-
+            
+            // ---ROCKET RENDERING---
             if (i == 3) {
-                //rocket rendering
                 glBindVertexArray(rocketVAO);
                 
                 glm::mat4 rocketModel = glm::mat4(1.0f);
@@ -419,11 +383,11 @@ int main()
                 //rebind the standard planet VAO for the next iterations
                 glBindVertexArray(VAO);
             } else {
-                //standard planet rendering
+                // ---STANDARD PLANET RENDERING---
                 glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
             }
 
-            //corona drawing
+            // ---SUN CORONA DRAWING---
             if(i==2){  //check for sun
                 glm::mat4 coronaModel = glm::mat4(1.0f);
                 coronaModel = glm::translate(coronaModel, solarSystem[i].position);
@@ -451,11 +415,11 @@ int main()
                 lightingShader.setInt("isCorona", 0);
             }
 
-            //cloud drawing
+            // ---CLOUD DRAWING---
             if(solarSystem[i].cloudTextureID != 0) {
                 glm::mat4 cloudModel = glm::mat4(1.0f);
                 
-                // 1. Move to the exact same planet position
+                // move to the exact same planet position
                 cloudModel = glm::translate(cloudModel, solarSystem[i].position);
                 cloudModel = glm::rotate(cloudModel, glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
                 cloudModel = glm::rotate(cloudModel, glm::radians(90.0f + 23.4f), glm::vec3(1.0f, 0.0f, 0.0f));
@@ -466,9 +430,9 @@ int main()
                 lightingShader.setMat4("model", cloudModel);
                 
                 lightingShader.setInt("useTexture", 1);
-                lightingShader.setInt("isCloud", 1); //  Activate the transparent cloud hack!
-                lightingShader.setInt("hasNightTexture", 0); //disable city lights for clouds
-                lightingShader.setInt("hasSpecularMap", 0); //disable spec map for clouds
+                lightingShader.setInt("isCloud", 1); 
+                lightingShader.setInt("hasNightTexture", 0); 
+                lightingShader.setInt("hasSpecularMap", 0); 
 
                 glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, solarSystem[i].cloudTextureID);
