@@ -8,7 +8,9 @@
 #include <glm/gtc/type_ptr.hpp>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
+
 #include "../include/Shader.h"
+#include "../include/Camera.h"
 
 struct Planet
 {   
@@ -30,29 +32,21 @@ int windowWidth = 1920;
 int windowHeight = 1080;
 bool showOrbit = true;
 bool oKeyPressed = false;
-// camera stuff
-glm::vec3 cameraPos = glm::vec3(0.0f, 5.0f, 10.0f); // start 15 units back
-glm::vec3 cameraFront;
-glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f); // y aaxis is up
-
-//orbital cam stuff
-bool isOrbitalMode = true;        // Start locked onto a planet!
-int targetIndex = 0;              // 0=Earth, 1=Moon, 2=Sun, 3=Rocket
-float orbitDistance = 4.0f;       // How far away we orbit
-bool tabKeyPressed = false;       // To prevent rapid-fire switching
+bool tabKeyPressed = false; 
 bool cKeyPressed = false;
 bool switched = false;
+
 // mouse tracking
 bool firstMouse = true;
-float yaw = -90.0f; // yaw is initialized to -90 degrees so we face the -Z axis
-float pitch = -20.5f;
 float lastX = 800.0f / 2.0f;
 float lastY = 600.0f / 2.0f;
-float fov = 45.0f; // this will control our zoom
 
 // timing(so camera moves at the same speed regardless of framerate)
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
+
+//global camera object
+Camera camera(glm::vec3(0.0f, 5.0f, 10.0f), glm::vec3(0.0f, 1.0f, 0.0f), -90.0f, -20.5f);
 
 // prototypes
 GLFWwindow *StartGLFW();
@@ -229,13 +223,6 @@ int main()
     float rocketOrbitVel = sqrt((G * earth.mass) / abs(rocket.position.z));
     solarSystem[3].velocity = glm::vec3(-rocketOrbitVel, 0.0f, 0.0f);
 
-    // calc cameraFront vector
-    glm::vec3 front;
-    front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-    front.y = sin(glm::radians(pitch));
-    front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-    cameraFront = glm::normalize(front);
-
     while (!glfwWindowShouldClose(window))
     {
         float currentFrame = glfwGetTime();
@@ -284,49 +271,29 @@ int main()
         }
 
         //camera positioning math
-        glm::mat4 view;
-        if(isOrbitalMode){
-            glm::vec3 targetPos = solarSystem[targetIndex].position;
-            float targetRadius = solarSystem[targetIndex].radius;
-            float minSafeDistance = targetRadius * 1.2f;
-            // float defaultDistance = targetRadius * 4.0f;
-
-            // if(switched) {
-            //     orbitDistance = defaultDistance;
-            //     switched = false;
-            // }
-            if(orbitDistance < minSafeDistance) orbitDistance = minSafeDistance;
-            cameraPos = targetPos - (cameraFront * orbitDistance);
-            
-            // 3. Look directly at the target!
-            view = glm::lookAt(cameraPos, targetPos, cameraUp);
-        }else{
-            // Standard Free-Fly Camera
-            view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-        }
-
-        glm::mat4 projection = glm::mat4(1.0f);
+        glm::mat4 view = camera.GetViewMatrix(solarSystem[camera.targetIndex].position, solarSystem[camera.targetIndex].radius);
+        
         float aspect = (float)windowWidth / (float)windowHeight;
-        projection = glm::perspective(glm::radians(fov), aspect, 0.1f, 10000000.0f);
+        glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), aspect, 0.1f, 10000000.0f);
 
         lightingShader.setMat4("view", view);
         lightingShader.setMat4("projection", projection);
-        lightingShader.setVec3("viewPos", cameraPos);
+        lightingShader.setVec3("viewPos", camera.Position);
+
         // Send Camera and Sun position to the shader (Sun is index 2)
         lightingShader.setVec3("lightPos", solarSystem[2].position);
 
-        // ----------milkyway rending-----------------
-        // 1. Turn off Depth Writing! 
-        // This is a magical graphics trick. It tells OpenGL: "Draw this, but pretend it is infinitely far away, so EVERYTHING else draws on top of it."
+        // MILKYWAY rending
+        // turn off Depth Writing 
+        // "Draw this, but pretend it is infinitely far away, so everything else draws on top of it"
         glDepthMask(GL_FALSE); 
         
         glBindVertexArray(VAO);
         glm::mat4 skyboxModel = glm::mat4(1.0f);
         
-        // 2. Lock the sphere to the Camera's exact position so we can never reach the edge
-        skyboxModel = glm::translate(skyboxModel, cameraPos); 
-        
-        // 3. Make it ridiculously massive
+        // Lock the sphere to the Camera's exact position so we can never reach the edge
+        skyboxModel = glm::translate(skyboxModel, camera.Position);
+        // Make it ridiculously massive
         skyboxModel = glm::scale(skyboxModel, glm::vec3(500000.0f)); 
 
         lightingShader.setMat4("model", skyboxModel);
@@ -337,15 +304,14 @@ int main()
         lightingShader.setInt("isCloud", 0);        // No transparent cloud math
         lightingShader.setInt("hasNightTexture", 0);        // No city lights
 
-        // 5. Bind the Milky Way texture
+        // Bind the Milky Way texture
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, skyboxTexture);
-
-        // 6. Draw the giant sphere
+        // Draw the giant sphere
         glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, 0);
-
-        // 7. Turn Depth Writing back on so the planets render normally!
+        // Turn Depth Writing back on so the planets render normally!
         glDepthMask(GL_TRUE);
+
 
         for (size_t i = 0; i < solarSystem.size(); i++){
             //drawing trail
@@ -554,21 +520,18 @@ void processInput(GLFWwindow *window, std::vector<Planet> &solarSystem)
     if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    //orbit toggle
+    //orbit trail toggle
     if(glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS){
         if (!oKeyPressed){
             oKeyPressed = true;
             showOrbit = !showOrbit;
         }
-    }
-    else{
-        oKeyPressed = false;
-    }
+    } else { oKeyPressed = false; }
 
     //cam toggle
     if(glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) {
         if (!cKeyPressed){
-            isOrbitalMode = !isOrbitalMode;
+            camera.ToggleOrbitalMode();
             cKeyPressed = true;
         }
     } else { cKeyPressed = false; }
@@ -576,70 +539,44 @@ void processInput(GLFWwindow *window, std::vector<Planet> &solarSystem)
     //orb cam : planet toggle
     if(glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
         if (!tabKeyPressed){
-            targetIndex++;
-            if (targetIndex >= solarSystem.size()) targetIndex = 0;
-            switched = true;
+            camera.CycleTarget(solarSystem.size());
             tabKeyPressed = true;
         }
     } else { tabKeyPressed = false; }
 
-    if(solarSystem.size()>3){
+    // Rocket controls
+    if(solarSystem.size() > 3){
         glm::vec3 direction = glm::normalize(solarSystem[3].velocity);
-        glm::vec3 dir2 = cameraFront; 
+        glm::vec3 dir2 = camera.Front; 
         
         float thrust2 = 2.0f * deltaTime; 
-
-        if(glfwGetKey(window, GLFW_KEY_I) == GLFW_PRESS){
-            solarSystem[3].velocity += dir2 * thrust2;
-        }
-
-        if(glfwGetKey(window, GLFW_KEY_K) == GLFW_PRESS){
-            solarSystem[3].velocity -= dir2 * thrust2;
-        }
+        if(glfwGetKey(window, GLFW_KEY_I) == GLFW_PRESS) solarSystem[3].velocity += dir2 * thrust2;
+        if(glfwGetKey(window, GLFW_KEY_K) == GLFW_PRESS) solarSystem[3].velocity -= dir2 * thrust2;
 
         float thrust = 2.0f * deltaTime;
-
-        if(glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS){
-            solarSystem[3].velocity += direction * thrust;
-        }
-
-        if(glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS){
-            solarSystem[3].velocity -= direction * thrust;
-        }
+        if(glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) solarSystem[3].velocity += direction * thrust;
+        if(glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) solarSystem[3].velocity -= direction * thrust;
     }
 
-    if(!isOrbitalMode){
-        float cameraSpeed = 5.0f * deltaTime;
-     // adjust 5.0f to fly faster or slower
-
-        // move front/back
-        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-            cameraPos += glm::normalize(glm::cross(glm::normalize(glm::cross(cameraFront, cameraUp)), cameraUp)) * cameraSpeed;
-        else if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-            cameraPos += glm::normalize(glm::cross(glm::normalize(glm::cross(cameraFront, cameraUp)), cameraUp)) * cameraSpeed;
-            // cameraPos += cameraSpeed * cameraFront;
-        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-            cameraPos -=glm::normalize(glm::cross(glm::normalize(glm::cross(cameraFront, cameraUp)), cameraUp)) * cameraSpeed;  
-        else if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-            cameraPos -=glm::normalize(glm::cross(glm::normalize(glm::cross(cameraFront, cameraUp)), cameraUp)) * cameraSpeed;
-
-        // move left/right
+    // Free-fly camera controls
+    if(!camera.isOrbitalMode){
+        bool isAccelerating = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
+        
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+            camera.ProcessKeyboard(FORWARD, deltaTime, isAccelerating);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            camera.ProcessKeyboard(BACKWARD, deltaTime, isAccelerating);
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-            cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+            camera.ProcessKeyboard(LEFT, deltaTime, isAccelerating);
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-            cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-
-        // fly up/down
-        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-            cameraPos += 10 * cameraSpeed * cameraUp;
-        else if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-            cameraPos += cameraSpeed * cameraUp;
-        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS && glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
-            cameraPos -= 10 * cameraSpeed * cameraUp;
-        else if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
-            cameraPos -= cameraSpeed * cameraUp;
+            camera.ProcessKeyboard(RIGHT, deltaTime, isAccelerating);
+        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+            camera.ProcessKeyboard(UP, deltaTime, isAccelerating);
+        if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
+            camera.ProcessKeyboard(DOWN, deltaTime, isAccelerating);
     }
 }
+
 // resizing
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
@@ -740,9 +677,7 @@ void generateSphere(float radius, int sectors, int stacks, std::vector<float> &v
 }
 
 //rocket gemoetry function
-void generateRocketGeometry(float radius, float bodyHeight, float coneHeight, int sectors, 
-                            std::vector<float> &vertices, std::vector<unsigned int> &indices, 
-                            int &bodyIndexCount, int &coneIndexCount) 
+void generateRocketGeometry(float radius, float bodyHeight, float coneHeight, int sectors, std::vector<float> &vertices, std::vector<unsigned int> &indices, int &bodyIndexCount, int &coneIndexCount) 
 {
     vertices.clear();
     indices.clear();
@@ -825,57 +760,24 @@ void generateRocketGeometry(float radius, float bodyHeight, float coneHeight, in
     coneIndexCount = indices.size() - bodyIndexCount; 
 }
 
-void mouse_callback(GLFWwindow *window, double xposIn, double yposIn)
-{
+void mouse_callback(GLFWwindow *window, double xposIn, double yposIn) {
     float xpos = static_cast<float>(xposIn);
     float ypos = static_cast<float>(yposIn);
 
-    if (firstMouse)
-    {
+    if (firstMouse) {
         lastX = xpos;
         lastY = ypos;
         firstMouse = false;
     }
 
     float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos; // reversed since y-coords go from bottom to top
+    float yoffset = lastY - ypos; // reversed
     lastX = xpos;
     lastY = ypos;
 
-    float sensitivity = (0.1f/45.0f) * fov;
-    xoffset *= sensitivity;
-    yoffset *= sensitivity;
-
-    yaw += xoffset;
-    pitch += yoffset;
-
-    // prevent camera from flipping upside down
-    if (pitch > 89.0f)
-        pitch = 89.0f;
-    if (pitch < -89.0f)
-        pitch = -89.0f;
-
-    // trigo stuff to convert 2D mouse movement into 3D direction vector
-    glm::vec3 front;
-    front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-    front.y = sin(glm::radians(pitch));
-    front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-    cameraFront = glm::normalize(front);
+    camera.ProcessMouseMovement(xoffset, yoffset);
 }
 
-void scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
-{   
-    if(isOrbitalMode){
-        // Zoom in and out by scrolling!
-        float zoomSpeed = orbitDistance * 0.1f;
-        orbitDistance -= (float)yoffset * zoomSpeed;
-        if (orbitDistance > 500.0f) orbitDistance = 500.0f;
-    }else{
-        //free fly cam
-        fov -= (float)yoffset; // scroll up reduces FOV (zoom in)
-        if (fov < 1.0f)
-            fov = 1.0f;
-        if (fov > 45.0f)
-            fov = 45.0f;
-    }
+void scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {   
+    camera.ProcessMouseScroll(static_cast<float>(yoffset));
 }

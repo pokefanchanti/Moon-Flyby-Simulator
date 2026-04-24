@@ -16,6 +16,7 @@ include_directories(${GLFW_INCLUDE_DIRS})
 add_executable(gravity_sim
     src/main.cpp
     src/Shader.cpp
+    src/Camera.cpp
     src/glad.c
 )
 
