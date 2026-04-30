@@ -195,21 +195,13 @@ You can pilot the rocket while in either camera mode!
 * ✅ Rotational Tilt for Earth and Moon
 * ✅ Tidal Locking for Moon
 * ✅ A rocket in Low Earth Orbit
-* ⬛ Earth and Moon revolving around the Sun
-* ⬛ Sun should have gravitational pull
-* ⬛ Earth and Moon should revolve around their barycentre
-* ⬛ Dynamic tilt to Moon's revolution plane like in real life 
 
 ### Graphical features :-
 * ✅ Clouds that look like theyre actually moving
 * ✅ Sun bloom and corona to represent the how bright it is
 * ✅ Dynamic textures for Earth - day and night textures should swap along horizon
 * ✅ 3D Rocket Model
-* ⬛ Shadows
 
 ### Functional features:-
 * ✅Orbital Camera
 * ✅Improved Rocket Controls
-* ⬛ UI that displays info (rocket velocity, distance from moon, distance from earth, time, etc..)
-* ⬛ Time Scale Feature (allows us to change the rate at which time flows : 1x, 5x, 10x, etc..)
-* ⬛ Autopilot Mode for Rocket
